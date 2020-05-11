@@ -48,7 +48,7 @@ public interface ConnectionManager {
     
     RedisURI applyNatMap(RedisURI address);
     
-    String getId();
+    String getId(); // 一般为UUID
     
     CommandSyncService getCommandExecutor();
 

@@ -91,6 +91,7 @@ public abstract class RedissonObject implements RObject {
     }
     
     protected final long toSeconds(long timeout, TimeUnit unit) {
+        // 这个 TimeUnit 可以做单位转换
         long seconds = unit.toSeconds(timeout);
         if (timeout != 0 && seconds == 0) {
             seconds = 1;

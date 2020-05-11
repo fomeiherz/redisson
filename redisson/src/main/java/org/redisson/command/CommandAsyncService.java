@@ -133,17 +133,28 @@ public class CommandAsyncService implements CommandAsyncExecutor {
         future.sync();
     }
 
+    /**
+     * 获取RFuture的结果
+     * 
+     * @param future  RFuture
+     * @param <V>  结果类型
+     * @return V
+     */
     @Override
     public <V> V get(RFuture<V> future) {
         try {
+            // 等待执行完毕
             future.await();
         } catch (InterruptedException e) {
+            // 线程自动终止
             Thread.currentThread().interrupt();
         }
         if (future.isSuccess()) {
+            // 立即获取结果
             return future.getNow();
         }
 
+        // 抛出异常
         throw convertException(future);
     }
     

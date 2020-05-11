@@ -15,6 +15,7 @@
  */
 package org.redisson;
 
+import java.io.IOException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
@@ -33,6 +34,8 @@ import org.redisson.redisnode.RedissonSentinelMasterSlaveNodes;
 import org.redisson.redisnode.RedissonSingleNode;
 import org.redisson.remote.ResponseEntry;
 import org.redisson.transaction.RedissonTransaction;
+import org.springframework.context.annotation.Bean;
+import org.springframework.core.io.ClassPathResource;
 
 /**
  * Main infrastructure class allows to get access
@@ -61,7 +64,7 @@ public class Redisson implements RedissonClient {
         this.config = config;
         Config configCopy = new Config(config);
 
-        connectionManager = ConfigSupport.createConnectionManager(configCopy);
+        connectionManager = ConfigSupport.createConnectionManager(configCopy); // 连接管理
         evictionScheduler = new EvictionScheduler(connectionManager.getCommandExecutor());
         writeBehindService = new WriteBehindService(connectionManager.getCommandExecutor());
     }
@@ -107,6 +110,20 @@ public class Redisson implements RedissonClient {
         }
         return redisson;
     }
+
+    // 创建一个 RedissonClient 客户端的案例
+//    @Bean
+//    public RedissonClient redissonClient() throws IOException {
+//        String[] profiles = env.getActiveProfiles();
+//        String profile = "";
+//        if(profiles.length > 0) {
+//            profile = "-" + profiles[0];
+//        }
+//        String redissionConfig = "redisson" + profile + ".yml";
+//        return Redisson.create(
+//                Config.fromYAML(new ClassPathResource(redissionConfig).getInputStream())
+//        );
+//    }
 
     /**
      * Create Reactive Redisson instance with default config

@@ -189,22 +189,22 @@ public class ConfigSupport {
     public static ConnectionManager createConnectionManager(Config configCopy) {
         UUID id = UUID.randomUUID();
         
-        if (configCopy.getMasterSlaveServersConfig() != null) {
+        if (configCopy.getMasterSlaveServersConfig() != null) { // 主从
             validate(configCopy.getMasterSlaveServersConfig());
             return new MasterSlaveConnectionManager(configCopy.getMasterSlaveServersConfig(), configCopy, id);
-        } else if (configCopy.getSingleServerConfig() != null) {
+        } else if (configCopy.getSingleServerConfig() != null) { // 单机
             validate(configCopy.getSingleServerConfig());
             return new SingleConnectionManager(configCopy.getSingleServerConfig(), configCopy, id);
-        } else if (configCopy.getSentinelServersConfig() != null) {
+        } else if (configCopy.getSentinelServersConfig() != null) { // 哨兵
             validate(configCopy.getSentinelServersConfig());
             return new SentinelConnectionManager(configCopy.getSentinelServersConfig(), configCopy, id);
-        } else if (configCopy.getClusterServersConfig() != null) {
+        } else if (configCopy.getClusterServersConfig() != null) { // 集群
             validate(configCopy.getClusterServersConfig());
             return new ClusterConnectionManager(configCopy.getClusterServersConfig(), configCopy, id);
-        } else if (configCopy.getReplicatedServersConfig() != null) {
+        } else if (configCopy.getReplicatedServersConfig() != null) { // ？？？
             validate(configCopy.getReplicatedServersConfig());
             return new ReplicatedConnectionManager(configCopy.getReplicatedServersConfig(), configCopy, id);
-        } else if (configCopy.getConnectionManager() != null) {
+        } else if (configCopy.getConnectionManager() != null) { // 
             return configCopy.getConnectionManager();
         }else {
             throw new IllegalArgumentException("server(s) address(es) not defined!");

@@ -113,7 +113,7 @@ public class RedissonLock extends RedissonExpirable implements RLock {
     private static final ConcurrentMap<String, ExpirationEntry> EXPIRATION_RENEWAL_MAP = new ConcurrentHashMap<>();
     protected long internalLockLeaseTime;
 
-    final String id;
+    final String id; // ConnectionManager.id
     final String entryName;
 
     protected final LockPubSub pubSub;
@@ -138,6 +138,8 @@ public class RedissonLock extends RedissonExpirable implements RLock {
     }
 
     protected String getLockName(long threadId) {
+        // 如果只是线程id的话，在分布式系统下可能会有不同系统有相同的线程id的情况，造成了可重入的情况。
+        // 因为一个系统只维护自己的ConnectionManager，所以 ConnectionManager.id 和 当前线程id 组合生成一个 LockName就避免了上面的问题
         return id + ":" + threadId;
     }
 
@@ -170,8 +172,18 @@ public class RedissonLock extends RedissonExpirable implements RLock {
         lock(leaseTime, unit, true);
     }
 
+    /**
+     * 加锁
+     * 
+     * @param leaseTime  释放时间
+     * @param unit  时间单位
+     * @param interruptibly  是否可中断。true-可中断
+     * @throws InterruptedException
+     */
     private void lock(long leaseTime, TimeUnit unit, boolean interruptibly) throws InterruptedException {
+        // 获取当前线程id
         long threadId = Thread.currentThread().getId();
+        // 尝试获取锁
         Long ttl = tryAcquire(leaseTime, unit, threadId);
         // lock acquired
         if (ttl == null) {
@@ -204,6 +216,7 @@ public class RedissonLock extends RedissonExpirable implements RLock {
                         future.getNow().getLatch().tryAcquire(ttl, TimeUnit.MILLISECONDS);
                     }
                 } else {
+                    // ttl < 0
                     if (interruptibly) {
                         future.getNow().getLatch().acquire();
                     } else {
@@ -218,6 +231,7 @@ public class RedissonLock extends RedissonExpirable implements RLock {
     }
     
     private Long tryAcquire(long leaseTime, TimeUnit unit, long threadId) {
+        // 等待异步返回的结果
         return get(tryAcquireAsync(leaseTime, unit, threadId));
     }
     
@@ -240,9 +254,10 @@ public class RedissonLock extends RedissonExpirable implements RLock {
     }
 
     private <T> RFuture<Long> tryAcquireAsync(long leaseTime, TimeUnit unit, long threadId) {
-        if (leaseTime != -1) {
+        if (leaseTime != -1) { // 定义了过期时间
             return tryLockInnerAsync(leaseTime, unit, threadId, RedisCommands.EVAL_LONG);
         }
+        // 未定义过期时间
         RFuture<Long> ttlRemainingFuture = tryLockInnerAsync(commandExecutor.getConnectionManager().getCfg().getLockWatchdogTimeout(), TimeUnit.MILLISECONDS, threadId, RedisCommands.EVAL_LONG);
         ttlRemainingFuture.onComplete((ttlRemaining, e) -> {
             if (e != null) {
@@ -251,6 +266,7 @@ public class RedissonLock extends RedissonExpirable implements RLock {
 
             // lock acquired
             if (ttlRemaining == null) {
+                // 看门狗定期延长锁时间
                 scheduleExpirationRenewal(threadId);
             }
         });
@@ -268,6 +284,8 @@ public class RedissonLock extends RedissonExpirable implements RLock {
             return;
         }
         
+        // 任务执行间隔时间：锁释放时间 / 3
+        // 这是netty提供的Timer定时任务工具
         Timeout task = commandExecutor.getConnectionManager().newTimeout(new TimerTask() {
             @Override
             public void run(Timeout timeout) throws Exception {
@@ -280,6 +298,7 @@ public class RedissonLock extends RedissonExpirable implements RLock {
                     return;
                 }
                 
+                // 延长redis的过期时间
                 RFuture<Boolean> future = renewExpirationAsync(threadId);
                 future.onComplete((res, e) -> {
                     if (e != null) {
@@ -300,6 +319,7 @@ public class RedissonLock extends RedissonExpirable implements RLock {
     
     private void scheduleExpirationRenewal(long threadId) {
         ExpirationEntry entry = new ExpirationEntry();
+        // 把ExpirationEntry放进一个map中
         ExpirationEntry oldEntry = EXPIRATION_RENEWAL_MAP.putIfAbsent(getEntryName(), entry);
         if (oldEntry != null) {
             oldEntry.addThreadId(threadId);
@@ -320,6 +340,11 @@ public class RedissonLock extends RedissonExpirable implements RLock {
                 internalLockLeaseTime, getLockName(threadId));
     }
 
+    /**
+     * 取消定时刷新过期时间的任务
+     * 
+     * @param threadId  线程id
+     */
     void cancelExpirationRenewal(Long threadId) {
         ExpirationEntry task = EXPIRATION_RENEWAL_MAP.get(getEntryName());
         if (task == null) {
@@ -349,9 +374,17 @@ public class RedissonLock extends RedissonExpirable implements RLock {
     }
 
     <T> RFuture<T> tryLockInnerAsync(long leaseTime, TimeUnit unit, long threadId, RedisStrictCommand<T> command) {
+        // 转换成毫秒
         internalLockLeaseTime = unit.toMillis(leaseTime);
 
+        // KEYS[1]：加锁的key。如redisson.getLock("myLock")中的"myLock"
+        // ARGV[1]：锁key的默认生存时间，默认30秒
+        // ARGV[2]：加锁的客户端id：ConnectionManager.id + 当前线程id
         return evalWriteAsync(getName(), LongCodec.INSTANCE, command,
+                // 第一种情况：如果key不存在，则当前线程加锁，计数器 + 1
+                // 第二种情况：如果该key是已被当前线程持有，计数器 + 1（保证锁的可重入）
+                // 第三种情况：返回该key的过期时间
+                // 返回：nil-加锁成功；long-加锁失败，返回当前锁过期时间
                 "if (redis.call('exists', KEYS[1]) == 0) then " +
                         "redis.call('hincrby', KEYS[1], ARGV[2], 1); " +
                         "redis.call('pexpire', KEYS[1], ARGV[1]); " +
@@ -707,36 +740,77 @@ public class RedissonLock extends RedissonExpirable implements RLock {
         });
     }
 
+    /**
+     * 异步获取锁
+     * 
+     * @return  是否加锁成功
+     */
     @Override
     public RFuture<Boolean> tryLockAsync() {
+        // 当前线程id
         return tryLockAsync(Thread.currentThread().getId());
     }
 
     @Override
     public RFuture<Boolean> tryLockAsync(long threadId) {
+        // 默认不设置超时时间
         return tryAcquireOnceAsync(-1, null, threadId);
     }
 
+    /**
+     * Tries to acquire the lock.
+     * Waits up to defined <code>waitTime</code> if necessary until the lock became available.
+     *
+     * @param waitTime the maximum time to acquire the lock
+     * @param unit time unit
+     * @return <code>true</code> if lock is successfully acquired,
+     *          otherwise <code>false</code> if lock is already set.
+     */
     @Override
     public RFuture<Boolean> tryLockAsync(long waitTime, TimeUnit unit) {
         return tryLockAsync(waitTime, -1, unit);
     }
 
+    /**
+     * Tries to acquire the lock with defined <code>leaseTime</code>.
+     * Waits up to defined <code>waitTime</code> if necessary until the lock became available.
+     *
+     * Lock will be released automatically after defined <code>leaseTime</code> interval.
+     *
+     * @param waitTime the maximum time to acquire the lock
+     * @param leaseTime lease time
+     * @param unit time unit
+     * @return <code>true</code> if lock is successfully acquired,
+     *          otherwise <code>false</code> if lock is already set.
+     */
     @Override
     public RFuture<Boolean> tryLockAsync(long waitTime, long leaseTime, TimeUnit unit) {
         long currentThreadId = Thread.currentThread().getId();
         return tryLockAsync(waitTime, leaseTime, unit, currentThreadId);
     }
 
+    /**
+     * Tries to acquire the lock by thread with specified <code>threadId</code> and  <code>leaseTime</code>.
+     * Waits up to defined <code>waitTime</code> if necessary until the lock became available.
+     *
+     * Lock will be released automatically after defined <code>leaseTime</code> interval.
+     *
+     * @param waitTime time interval to acquire lock
+     * @param leaseTime time interval after which lock will be released automatically 
+     * @param unit the time unit of the {@code waitTime} and {@code leaseTime} arguments
+     * @return <code>true</code> if lock acquired otherwise <code>false</code>
+     */
     @Override
     public RFuture<Boolean> tryLockAsync(long waitTime, long leaseTime, TimeUnit unit,
             long currentThreadId) {
-        RPromise<Boolean> result = new RedissonPromise<Boolean>();
+        RPromise<Boolean> result = new RedissonPromise<>();
 
-        AtomicLong time = new AtomicLong(unit.toMillis(waitTime));
+        AtomicLong time = new AtomicLong(unit.toMillis(waitTime)); // 等待N毫秒
         long currentTime = System.currentTimeMillis();
         RFuture<Long> ttlFuture = tryAcquireAsync(leaseTime, unit, currentThreadId);
+        // 
         ttlFuture.onComplete((ttl, e) -> {
+            // 出现异常
             if (e != null) {
                 result.tryFailure(e);
                 return;
@@ -752,14 +826,15 @@ public class RedissonLock extends RedissonExpirable implements RLock {
 
             long el = System.currentTimeMillis() - currentTime;
             time.addAndGet(-el);
-            
+
+            // 等待时间已过
             if (time.get() <= 0) {
                 trySuccessFalse(currentThreadId, result);
                 return;
             }
             
             long current = System.currentTimeMillis();
-            AtomicReference<Timeout> futureRef = new AtomicReference<Timeout>();
+            AtomicReference<Timeout> futureRef = new AtomicReference<>();
             RFuture<RedissonLockEntry> subscribeFuture = subscribe(currentThreadId);
             subscribeFuture.onComplete((r, ex) -> {
                 if (ex != null) {

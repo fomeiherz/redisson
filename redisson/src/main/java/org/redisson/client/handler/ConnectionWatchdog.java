@@ -101,6 +101,7 @@ public class ConnectionWatchdog extends ChannelInboundHandlerAdapter {
     }
 
     private void tryReconnect(final RedisConnection connection, final int nextAttempt) {
+        // redisson是使用netty来跟Redis服务器交互的
         if (connection.isClosed() || bootstrap.config().group().isShuttingDown()) {
             return;
         }

@@ -57,7 +57,7 @@ public class RedisChannelInitializer extends ChannelInitializer<Channel> {
     private final RedisClientConfig config;
     private final RedisClient redisClient;
     private final Type type;
-    private final ConnectionWatchdog connectionWatchdog;
+    private final ConnectionWatchdog connectionWatchdog; // 看门狗角色
     private final PingConnectionHandler pingConnectionHandler;
     
     public RedisChannelInitializer(Bootstrap bootstrap, RedisClientConfig config, RedisClient redisClient, ChannelGroup channels, Type type) {
@@ -84,6 +84,8 @@ public class RedisChannelInitializer extends ChannelInitializer<Channel> {
             ch.pipeline().addLast(new RedisPubSubConnectionHandler(redisClient));
         }
 
+        // 这里把ConnectionWatchdog放在这里有什么用呢？
+        // 这里是netty的东西，添加到管道中，会在结果请求开始或者结束时调用
         ch.pipeline().addLast(
             connectionWatchdog,
             CommandEncoder.INSTANCE,

@@ -153,6 +153,12 @@ public interface RFuture<V> extends java.util.concurrent.Future<V>, CompletionSt
      */
     boolean awaitUninterruptibly(long timeoutMillis);
 
+    /**
+     * Future完成后触发的动作
+     * 实现类：{@link org.redisson.misc.RedissonPromise#onComplete(BiConsumer)}
+     * 
+     * @param action  动作
+     */
     void onComplete(BiConsumer<? super V, ? super Throwable> action);
     
 }

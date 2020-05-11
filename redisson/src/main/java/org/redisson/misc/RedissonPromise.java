@@ -178,8 +178,10 @@ public class RedissonPromise<T> extends CompletableFuture<T> implements RPromise
 
     @Override
     public void onComplete(BiConsumer<? super T, ? super Throwable> action) {
+        // Promise#addListener()怎么触发这个动作呢？
         promise.addListener(f -> {
             if (!f.isSuccess()) {
+                // BiConsumer执行动作
                 action.accept(null, f.cause());
                 return;
             }
